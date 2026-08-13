@@ -278,6 +278,26 @@ impl Channels {
         }
     }
 
+    /// Report a command's exit status to the client.
+    ///
+    /// RFC 4254 sends this before the channel closes; a client that never
+    /// receives it has no way to know how the command finished. OpenSSH
+    /// reports 255 in that case, making a normal logout look like a failure.
+    pub(crate) fn send_exit_status(
+        &self,
+        num: ChanNum,
+        status: u32,
+        s: &mut TrafSend,
+    ) -> Result<()> {
+        let ch = self.get(num)?;
+        match ch.ty {
+            ChanType::Session => {
+                Req::ExitStatus(packets::ExitStatus { status }).send(ch, s)
+            }
+            _ => error::BadChannelData.fail(),
+        }
+    }
+
     pub(crate) fn term_break(
         &self,
         num: ChanNum,
@@ -671,8 +691,8 @@ pub enum Req<'a> {
     Pty(Pty),
     WinChange(packets::WinChange),
     Break(packets::Break),
+    ExitStatus(packets::ExitStatus),
     // Signal,
-    // ExitStatus,
     // ExitSignal,
 }
 
@@ -701,6 +721,7 @@ impl Req<'_> {
             }),
             Req::WinChange(rt) => ChannelReqType::WinChange(rt),
             Req::Break(rt) => ChannelReqType::Break(rt),
+            Req::ExitStatus(rt) => ChannelReqType::ExitStatus(rt),
         };
 
         let p = ChannelRequest {

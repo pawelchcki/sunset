@@ -191,6 +191,19 @@ impl<'a> Runner<'a, server::Server> {
         Self::new(inbuf, outbuf)
     }
 
+    /// Send the session's exit status to the client.
+    ///
+    /// Must be called before [`channel_done()`](Runner::channel_done): the
+    /// status is a channel request, so the channel has to still be open.
+    pub fn send_exit_status(
+        &mut self,
+        chan: &ChanHandle,
+        status: u32,
+    ) -> Result<()> {
+        let mut s = self.traf_out.sender(&mut self.keys);
+        self.conn.channels.send_exit_status(chan.0, status, &mut s)
+    }
+
     pub(crate) fn resume_servhostkeys(&mut self, keys: &[&SignKey]) -> Result<()> {
         let (payload, _seq) = self.traf_in.payload().trap()?;
         let mut s = self.traf_out.sender(&mut self.keys);
