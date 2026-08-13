@@ -294,9 +294,9 @@ pub enum ServEvent<'g, 'a> {
     // the same ServExecRequest.
     SessionSubsystem(ServExecRequest<'g, 'a>),
     /// Client requested a PTY for the channel.
-    ///
-    /// TODO details
     SessionPty(ServPtyRequest<'g, 'a>),
+    /// Client's terminal was resized.
+    SessionWinChange(ServWinChange<'g, 'a>),
     /// Server has received one environment variable.
     /// Note: input strings are not sanitised.
     SessionEnv(ServEnvironmentRequest<'g, 'a>),
@@ -325,6 +325,7 @@ impl Debug for ServEvent<'_, '_> {
             Self::SessionExec(_) => "SessionExec",
             Self::SessionSubsystem(_) => "SessionSubsystem",
             Self::SessionPty(_) => "SessionPty",
+            Self::SessionWinChange(_) => "SessionWinChange",
             Self::SessionEnv(_) => "Environment",
             Self::Defunct => "Defunct",
             Self::PollAgain => "PollAgain",
@@ -797,8 +798,6 @@ impl Drop for ServExecRequest<'_, '_> {
 }
 
 /// A PTY request
-///
-/// Placeholder, doesn't yet return the PTY information.
 pub struct ServPtyRequest<'g, 'a> {
     runner: &'g mut Runner<'a, Server>,
     num: ChanNum,
@@ -810,7 +809,13 @@ impl<'g, 'a> ServPtyRequest<'g, 'a> {
         Self { runner, num, done: false }
     }
 
-    // TODO return PTY information to the caller
+    /// Retrieve the terminal requested by the client.
+    ///
+    /// Note that `term`, `cols` and `rows` are attacker-controlled: they come
+    /// straight off the wire before any application policy has run.
+    pub fn pty(&self) -> Result<Pty> {
+        self.runner.fetch_servpty()
+    }
 
     /// Indicate that the request succeeded.
     ///
@@ -848,6 +853,63 @@ impl Drop for ServPtyRequest<'_, '_> {
         if !self.done {
             if let Err(e) = self.runner.resume_chanreq(false) {
                 trace!("Error for shellreq: {e}")
+            }
+        }
+    }
+}
+
+/// A terminal window size change.
+///
+/// RFC 4254 requires `want_reply` to be false for `window-change`, so
+/// `succeed()` and `fail()` send nothing; they exist only to keep the
+/// request/resume state machine uniform with the other channel requests.
+/// Dropping the event without calling either is equivalent to `succeed()`,
+/// because an application that does not track window size is not in error.
+pub struct ServWinChange<'g, 'a> {
+    runner: &'g mut Runner<'a, Server>,
+    num: ChanNum,
+    done: bool,
+}
+
+impl<'g, 'a> ServWinChange<'g, 'a> {
+    fn new(runner: &'g mut Runner<'a, Server>, num: ChanNum) -> Self {
+        Self { runner, num, done: false }
+    }
+
+    /// Retrieve the new terminal dimensions.
+    ///
+    /// As with [`ServPtyRequest::pty()`] these values are attacker-controlled.
+    pub fn winchange(&self) -> Result<packets::WinChange> {
+        self.runner.fetch_servwinchange()
+    }
+
+    /// Indicate that the request succeeded.
+    pub fn succeed(mut self) -> Result<()> {
+        self.done = true;
+        self.runner.resume_chanreq(true)
+    }
+
+    /// Indicate that the request failed.
+    pub fn fail(mut self) -> Result<()> {
+        self.done = true;
+        self.runner.resume_chanreq(false)
+    }
+
+    /// Return the associated channel number.
+    ///
+    /// This will correspond to a `ChanHandle::num()`
+    /// from a previous [`ServOpenSession`] event.
+    pub fn channel(&self) -> ChanNum {
+        self.num
+    }
+}
+
+// implement Drop to be the same as .succeed()
+impl Drop for ServWinChange<'_, '_> {
+    fn drop(&mut self) {
+        if !self.done {
+            if let Err(e) = self.runner.resume_chanreq(true) {
+                trace!("Error for winchange: {e}")
             }
         }
     }
@@ -942,6 +1004,9 @@ pub(crate) enum ServEventId {
     SessionPty {
         num: ChanNum,
     },
+    SessionWinChange {
+        num: ChanNum,
+    },
     Environment {
         num: ChanNum,
     },
@@ -1002,6 +1067,10 @@ impl ServEventId {
                 debug_assert!(matches!(p, Some(Packet::ChannelRequest(_))));
                 Ok(ServEvent::SessionPty(ServPtyRequest::new(runner, num)))
             }
+            Self::SessionWinChange { num } => {
+                debug_assert!(matches!(p, Some(Packet::ChannelRequest(_))));
+                Ok(ServEvent::SessionWinChange(ServWinChange::new(runner, num)))
+            }
             Self::Environment { num } => {
                 debug_assert!(matches!(p, Some(Packet::ChannelRequest(_))));
                 Ok(ServEvent::SessionEnv(ServEnvironmentRequest::new(runner, num)))
@@ -1024,6 +1093,7 @@ impl ServEventId {
             | Self::SessionExec { .. }
             | Self::SessionSubsystem { .. }
             | Self::Environment { .. }
+            | Self::SessionWinChange { .. }
             | Self::SessionPty { .. } => true,
         }
     }

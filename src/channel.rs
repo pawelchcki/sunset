@@ -565,6 +565,29 @@ impl Channels {
         }
     }
 
+    pub fn fetch_servpty<'p>(&self, p: &Packet<'p>) -> Result<Pty> {
+        match p {
+            Packet::ChannelRequest(ChannelRequest {
+                req: ChannelReqType::Pty(pty),
+                ..
+            }) => pty.try_into(),
+            _ => Error::bug(),
+        }
+    }
+
+    pub fn fetch_servwinchange<'p>(
+        &self,
+        p: &Packet<'p>,
+    ) -> Result<packets::WinChange> {
+        match p {
+            Packet::ChannelRequest(ChannelRequest {
+                req: ChannelReqType::WinChange(w),
+                ..
+            }) => Ok(w.clone()),
+            _ => Error::bug(),
+        }
+    }
+
     pub fn fetch_env_name<'p>(&self, p: &Packet<'p>) -> Result<TextString<'p>> {
         match p {
             Packet::ChannelRequest(ChannelRequest {
@@ -933,6 +956,9 @@ impl Channel {
             }
             ChannelReqType::Pty(_) => {
                 Ok(DispatchEvent::ServEvent(ServEventId::SessionPty { num }))
+            }
+            ChannelReqType::WinChange(_) => {
+                Ok(DispatchEvent::ServEvent(ServEventId::SessionWinChange { num }))
             }
             ChannelReqType::Environment(_) => {
                 Ok(DispatchEvent::ServEvent(ServEventId::Environment { num }))
