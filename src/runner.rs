@@ -698,6 +698,17 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
     ///
     /// Channel numbers will not be re-used without calling this, so
     /// failing to call this may result in running out of channels.
+    /// Close a channel from this side.
+    ///
+    /// Sends `CHANNEL_EOF` and `CHANNEL_CLOSE` so the peer learns the session
+    /// finished, instead of only noticing when the transport goes away. Call
+    /// before [`channel_done()`](Runner::channel_done), and after any
+    /// `send_exit_status()`.
+    pub fn channel_close(&mut self, chan: &ChanHandle) -> Result<()> {
+        let mut s = self.traf_out.sender(&mut self.keys);
+        self.conn.channels.app_close(chan.0, &mut s)
+    }
+
     pub fn channel_done(&mut self, chan: ChanHandle) -> Result<()> {
         self.conn.channels.done(chan.0)?;
         // Prevent giving any already-received data for this channel.

@@ -101,6 +101,18 @@ impl Channels {
         self.get_mut(handle.0).unwrap()
     }
 
+    /// Close a channel from this side, telling the peer the session is over.
+    ///
+    /// Only `handle_close()` used to emit these, which meant a channel could be
+    /// closed in response to the peer but never *by* the application: a server
+    /// whose command had exited had no way to say so, and could only drop the
+    /// transport underneath the client.
+    pub(crate) fn app_close(&mut self, num: ChanNum, s: &mut TrafSend) -> Result<()> {
+        let is_client = self.is_client;
+        let ch = self.get_mut(num)?;
+        ch.send_eof_close(s, is_client)
+    }
+
     /// Must be called when an application has finished with a channel.
     pub fn done(&mut self, num: ChanNum) -> Result<()> {
         let ch = self.get_mut(num)?;
@@ -1046,6 +1058,21 @@ impl Channel {
 
         self.state = ChanState::RecvEof;
         // todo!();
+        Ok(())
+    }
+
+    /// Send `CHANNEL_EOF` then `CHANNEL_CLOSE`, skipping either if it has
+    /// already gone out. The channel stays until the peer's own close arrives,
+    /// which `handle_close()` deals with as before.
+    fn send_eof_close(&mut self, s: &mut TrafSend, _is_client: bool) -> Result<()> {
+        if !self.sent_eof {
+            s.send(packets::ChannelEof { num: self.send_num()? })?;
+            self.sent_eof = true;
+        }
+        if !self.sent_close {
+            s.send(packets::ChannelClose { num: self.send_num()? })?;
+            self.sent_close = true;
+        }
         Ok(())
     }
 
