@@ -857,6 +857,7 @@ impl<'a, CS: CliServ> Runner<'a, CS> {
                 | DispatchEvent::ServEvent(ServEventId::SessionSubsystem { .. })
                 | DispatchEvent::ServEvent(ServEventId::SessionPty { .. })
                 | DispatchEvent::ServEvent(ServEventId::Environment { .. })
+                | DispatchEvent::ServEvent(ServEventId::SessionWinChange { .. })
         ));
     }
 
